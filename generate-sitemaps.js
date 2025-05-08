@@ -32,7 +32,7 @@ const CONTENT_TYPES_CONFIG = [
   },
   {
     type: "collection",
-    apiSlug: "blog-posts",
+    apiSlug: "blogs",
     pathPrefix: "blog",
     priority: "0.6",
     changefreq: "monthly",
