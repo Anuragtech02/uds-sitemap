@@ -21,25 +21,26 @@ const CONTENT_TYPES_CONFIG = [
     apiSlug: "reports",
     pathPrefix: "reports",
     priority: "0.7",
-    changefreq: "daily",
+    changefreq: "weekly",
   },
   {
     type: "collection",
     apiSlug: "news-articles",
     pathPrefix: "news",
     priority: "0.8",
-    changefreq: "weekly",
+    changefreq: "daily",
   },
   {
     type: "collection",
-    apiSlug: "blogs",
+    apiSlug: "blog-posts",
     pathPrefix: "blog",
     priority: "0.6",
-    changefreq: "weekly",
+    changefreq: "monthly",
   },
 
   // Single Types (Ensure apiSlug matches the API ID in Strapi)
   // defaultUrlPath is the URL segment for the default language. For homepage, it's ''.
+  // These single types are assumed NOT to use a custom 'slug' field from Strapi for their URL path.
   {
     type: "single",
     apiSlug: "home-page",
@@ -132,7 +133,6 @@ function getPageUrl(
   itemType = "collection",
   slugIfCollection = null
 ) {
-  // This line handles the prefix:
   const langPrefix =
     language === DEFAULT_LANGUAGE || language === "" ? "" : `/${language}`;
 
@@ -142,7 +142,6 @@ function getPageUrl(
       pathSegment === null ||
       typeof pathSegment === "undefined"
     ) {
-      // For homepage (empty pathSegment)
       return langPrefix === ""
         ? `${SITE_BASE_URL}/`
         : `${SITE_BASE_URL}${langPrefix}`;
@@ -220,7 +219,7 @@ function readExistingSitemap(filepath) {
           urls.set(loc, {
             loc,
             lastmod,
-            alternates, // Add other fields if needed from config
+            alternates,
             changefreq: el
               .find((c) => c.node.nodeName === "changefreq", null, true)
               ?.text(),
@@ -265,7 +264,7 @@ async function fetchStrapiCollectionEntries(
     "pagination[page]": page,
     "pagination[pageSize]": STRAPI_PAGE_SIZE,
     "sort[0]": "updatedAt:desc",
-    publicationState: "live", // Ensure only live entries are fetched
+    publicationState: "live",
   };
 
   if (sinceTimestamp) {
@@ -308,18 +307,19 @@ async function fetchStrapiSingleEntry(singleTypeApiSlug, language) {
     `Fetching single type ${singleTypeApiSlug} for language: ${language}`
   );
   try {
+    const params = {
+      locale: language,
+      "populate[localizations][fields][0]": "locale", // Only need locale from localizations for path construction
+      "fields[0]": "updatedAt",
+      "fields[1]": "locale",
+      "fields[2]": "publishedAt",
+      publicationState: "live",
+    };
+
     const response = await axiosInstance.get(`/api/${singleTypeApiSlug}`, {
-      params: {
-        locale: language,
-        "populate[localizations][fields][0]": "slug",
-        "populate[localizations][fields][1]": "locale",
-        "fields[0]": "updatedAt",
-        "fields[1]": "slug",
-        "fields[2]": "locale",
-        "fields[3]": "publishedAt",
-        publicationState: "live", // Ensure only live entries are fetched
-      },
+      params,
     });
+
     if (
       response.data &&
       response.data.data &&
@@ -338,10 +338,18 @@ async function fetchStrapiSingleEntry(singleTypeApiSlug, language) {
       console.log(
         `Single type ${singleTypeApiSlug} (${language}) not found (404).`
       );
+    } else if (
+      error.response &&
+      error.response.data &&
+      error.response.data.error
+    ) {
+      console.error(
+        `Error fetching Strapi single entry ${singleTypeApiSlug} (${language}): Status ${error.response.data.error.status} - ${error.response.data.error.message}`
+      );
     } else {
       console.error(
         `Error fetching Strapi single entry ${singleTypeApiSlug} (${language}):`,
-        error.response ? error.response.data : error.message
+        error.message
       );
     }
     return null;
@@ -409,10 +417,8 @@ async function main() {
       );
   }
 
-  // Consolidate all URLs across all content types and languages first
-  const allContentUrls = new Map(); // loc -> { loc, lastmod, alternates, changefreq, priority }
+  const allContentUrls = new Map();
 
-  // In incremental mode, load all existing URLs from all sitemap parts
   if (SCRIPT_MODE === "incremental") {
     fs.readdirSync(OUTPUT_DIR).forEach((file) => {
       if (file.endsWith(".xml") && file !== "sitemap.xml") {
@@ -441,7 +447,6 @@ async function main() {
           entriesFromStrapi.push(singleEntry);
           fetchedSomethingNew = true;
         } else if (SCRIPT_MODE === "incremental") {
-          // Attempt to remove if not found/unpublished
           const locToRemove = getPageUrl(
             lang,
             contentType.defaultUrlPath,
@@ -455,7 +460,6 @@ async function main() {
           }
         }
       } else {
-        // collection
         const collectionEntries = await fetchStrapiCollectionEntries(
           contentType.apiSlug,
           lang,
@@ -469,8 +473,7 @@ async function main() {
         let pathForUrlConstruction,
           itemSlugForCollection = null;
         if (isSingleType) {
-          pathForUrlConstruction =
-            entry.attributes.slug || contentType.defaultUrlPath;
+          pathForUrlConstruction = contentType.defaultUrlPath; // Always use defaultUrlPath for single types now
           if (contentType.defaultUrlPath === "" && lang === DEFAULT_LANGUAGE)
             pathForUrlConstruction = "";
         } else {
@@ -501,8 +504,7 @@ async function main() {
             let altPathSegment,
               altSlugIfCollection = null;
             if (isSingleType) {
-              altPathSegment =
-                locEntry.attributes.slug || contentType.defaultUrlPath;
+              altPathSegment = contentType.defaultUrlPath; // Use defaultUrlPath for alternates too
               if (
                 contentType.defaultUrlPath === "" &&
                 altLocale !== DEFAULT_LANGUAGE &&
@@ -511,7 +513,7 @@ async function main() {
                 altPathSegment = "";
             } else {
               altPathSegment = contentType.pathPrefix;
-              if (!locEntry.attributes.slug) return; // Skip this alternate
+              if (!locEntry.attributes.slug) return;
               altSlugIfCollection = locEntry.attributes.slug;
             }
             if (altLocale) {
@@ -540,9 +542,7 @@ async function main() {
     }
   }
 
-  // Deletion handling for collections in incremental mode (needs full list of live slugs)
   if (SCRIPT_MODE === "incremental" && lastRunTimestamp) {
-    // Only run if there was a previous state
     console.log("Incremental: Performing deletion checks for collections...");
     const liveCollectionItemLocs = new Set();
     for (const lang of LANGUAGES) {
@@ -553,7 +553,7 @@ async function main() {
           contentType.apiSlug,
           lang,
           null
-        ); // Full fetch for current state
+        );
         allCurrentLiveEntries.forEach((entry) => {
           if (entry.attributes.slug) {
             liveCollectionItemLocs.add(
@@ -571,13 +571,11 @@ async function main() {
 
     const urlsToDelete = [];
     allContentUrls.forEach((urlData, locKey) => {
-      // Check if this locKey corresponds to a known collection type pattern
       const isPotentiallyCollection = CONTENT_TYPES_CONFIG.some(
         (ct) =>
           ct.type === "collection" && locKey.includes(`/${ct.pathPrefix}/`)
       );
       if (isPotentiallyCollection && !liveCollectionItemLocs.has(locKey)) {
-        // This was a collection item but is no longer live
         urlsToDelete.push(locKey);
       }
     });
@@ -590,60 +588,39 @@ async function main() {
     }
   }
 
-  // Now, write all sitemap files based on `allContentUrls`
   const finalUrlListForAllSitemaps = Array.from(allContentUrls.values());
-  const sitemapFileRegistry = []; // To track generated sitemap files for the index
-
-  // Group URLs by a sitemap file key (e.g., "reports-en", "singlepages-all")
+  const sitemapFileRegistry = [];
   const urlsBySitemapFileKey = new Map();
 
   finalUrlListForAllSitemaps.forEach((urlData) => {
-    // Determine a key for the sitemap file. For simplicity, group all single types into one sitemap.
-    // Collections get their own per language.
-    let fileKey = "other-pages"; // Default for single types or uncategorized
+    let fileKey = "other-pages";
     const locPath = new URL(urlData.loc).pathname;
+    const currentEntryLang =
+      LANGUAGES.find((l) => locPath.startsWith(`/${l}/`)) || DEFAULT_LANGUAGE;
 
     for (const ct of CONTENT_TYPES_CONFIG) {
       if (ct.type === "collection" && locPath.includes(`/${ct.pathPrefix}/`)) {
-        const langMatch = LANGUAGES.find(
-          (l) =>
-            locPath.startsWith(`/${l}/`) ||
-            (l === DEFAULT_LANGUAGE &&
-              !LANGUAGES.some(
-                (otherL) =>
-                  otherL !== DEFAULT_LANGUAGE &&
-                  locPath.startsWith(`/${otherL}/`)
-              ))
-        );
-        fileKey = `${ct.apiSlug}-${langMatch || DEFAULT_LANGUAGE}`;
+        fileKey = `${ct.apiSlug}-${currentEntryLang}`;
         break;
       } else if (ct.type === "single") {
-        // Check if URL matches pattern for a single type
-        const expectedPathForSingle = getPageUrl(
-          LANGUAGES.find(
-            (l) => locPath.startsWith(`/${l}/`) || DEFAULT_LANGUAGE
-          ),
+        let expectedPathForSingle = getPageUrl(
+          currentEntryLang,
           ct.defaultUrlPath,
           "single"
         ).replace(SITE_BASE_URL, "");
-        if (
-          locPath === expectedPathForSingle ||
-          (locPath === "/" && ct.defaultUrlPath === "")
+        if (currentEntryLang === DEFAULT_LANGUAGE && ct.defaultUrlPath === "") {
+          // Homepage default lang
+          expectedPathForSingle = "/";
+        } else if (
+          currentEntryLang !== DEFAULT_LANGUAGE &&
+          ct.defaultUrlPath === ""
         ) {
-          // Group single pages more granularly if desired, or keep them in 'other-pages'
-          // For instance, by language:
-          const langMatch = LANGUAGES.find(
-            (l) =>
-              locPath.startsWith(`/${l}/`) ||
-              (l === DEFAULT_LANGUAGE &&
-                !LANGUAGES.some(
-                  (otherL) =>
-                    otherL !== DEFAULT_LANGUAGE &&
-                    locPath.startsWith(`/${otherL}/`)
-                ))
-          );
-          fileKey = `single-${ct.apiSlug}-${langMatch || DEFAULT_LANGUAGE}`; // More granular
-          // fileKey = `static-pages-${langMatch || DEFAULT_LANGUAGE}`; // Broader grouping
+          // Homepage other lang
+          expectedPathForSingle = `/${currentEntryLang}`;
+        }
+
+        if (locPath === expectedPathForSingle) {
+          fileKey = `single-${ct.apiSlug}-${currentEntryLang}`;
           break;
         }
       }
@@ -653,8 +630,6 @@ async function main() {
     urlsBySitemapFileKey.get(fileKey).push(urlData);
   });
 
-  // Remove all existing individual sitemap XML files before writing new ones
-  // (sitemap.xml and sitemap_state.json are handled by full mode or preserved in incremental)
   fs.readdirSync(OUTPUT_DIR).forEach((f) => {
     if (f.endsWith(".xml") && f !== "sitemap.xml") {
       try {
@@ -687,7 +662,6 @@ async function main() {
     }
   });
 
-  // Generate sitemap index
   if (sitemapFileRegistry.length > 0) {
     const indexXmlContent = generateSitemapIndexXML(sitemapFileRegistry);
     fs.writeFileSync(path.join(OUTPUT_DIR, "sitemap.xml"), indexXmlContent);
@@ -703,7 +677,6 @@ async function main() {
     }
   }
 
-  // Update state
   if (
     SCRIPT_MODE === "full" ||
     (SCRIPT_MODE === "incremental" && fetchedSomethingNew) ||
