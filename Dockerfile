@@ -1,12 +1,11 @@
-# sitemap-generator/Dockerfile
-FROM node:18-alpine AS builder
+FROM node:20-alpine AS builder
 
 WORKDIR /app
 
 # Copy only package files first for layer caching
 COPY package*.json ./
 # Install dependencies
-RUN npm install
+RUN npm install --omit=dev # Omit devDependencies for smaller final image
 
 # Copy the actual script
 COPY generate-sitemaps.js ./
@@ -14,9 +13,8 @@ COPY generate-sitemaps.js ./
 # --- Second Stage --- Use a smaller base if possible, ensure cron is available
 FROM alpine:latest
 
-# Install cron and nodejs runtime (needed to run the script)
-# ca-certificates is needed for HTTPS requests to Strapi
-RUN apk add --no-cache cron nodejs npm ca-certificates
+# Install dcron (for cron daemon), nodejs runtime, and ca-certificates
+RUN apk add --no-cache dcron nodejs npm ca-certificates
 
 WORKDIR /app
 
@@ -28,11 +26,11 @@ COPY --from=builder /app/generate-sitemaps.js ./
 COPY crontab /etc/crontabs/root
 
 # Give execution rights on the crontab file (usually not needed but safe)
-RUN chmod 0644 /etc/crontabs/root
+# RUN chmod 0644 /etc/crontabs/root # This might not be needed if crond runs as root
 
-# Create log file and grant permissions if needed
-RUN touch /var/log/cron.log && chmod +w /var/log/cron.log
+# Create log file and make it writable
+RUN touch /var/log/cron.log && chmod 666 /var/log/cron.log # Make writable by crond
 
-# Run cron in the foreground and tail the log file
+# Run crond in the foreground and tail the log file
 # This keeps the container running
-CMD crond -f -l 8 && tail -f /var/log/cron.log
+CMD crond -f -l 8 -L /var/log/cron.log && tail -f /var/log/cron.log
