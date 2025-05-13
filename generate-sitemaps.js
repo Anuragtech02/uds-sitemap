@@ -143,10 +143,8 @@ function getPageUrl(
 
 function generateSitemapXML(urls) {
   // Create the document and then add the processing instruction
-  const doc = create({ version: "1.0", encoding: "UTF-8" }).pro(
-    "xml-stylesheet",
-    'type="text/xsl" href="/sitemap.xsl"'
-  ); // Use .pro() for document-level PI
+  const doc = create({ version: "1.0", encoding: "UTF-8" });
+  doc.dtd().ins("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"');
 
   // Now create the root element as a child of the document
   const urlset = doc.ele("urlset", {
@@ -176,12 +174,9 @@ function generateSitemapXML(urls) {
 
 function generateSitemapIndexXML(sitemapLocations) {
   // Create the document and then add the processing instruction
-  const doc = create({ version: "1.0", encoding: "UTF-8" }).pro(
-    "xml-stylesheet",
-    'type="text/xsl" href="/sitemap.xsl"'
-  ); // Use .pro() for document-level PI
+  const doc = create({ version: "1.0", encoding: "UTF-8" });
+  doc.dtd().ins("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"');
 
-  // Now create the root element as a child of the document
   const sitemapindex = doc.ele("sitemapindex", {
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
   });
