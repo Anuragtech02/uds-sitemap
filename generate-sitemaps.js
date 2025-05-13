@@ -142,17 +142,20 @@ function getPageUrl(
 }
 
 function generateSitemapXML(urls) {
-  const doc = create({ version: "1.0", encoding: "UTF-8" });
-  doc.pi("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"'); // Use doc.pi()
+  // Create the document and then add the processing instruction
+  const doc = create({ version: "1.0", encoding: "UTF-8" }).pro(
+    "xml-stylesheet",
+    'type="text/xsl" href="/sitemap.xsl"'
+  ); // Use .pro() for document-level PI
 
+  // Now create the root element as a child of the document
   const urlset = doc.ele("urlset", {
-    // Create root element
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
     "xmlns:xhtml": "http://www.w3.org/1999/xhtml",
   });
 
   urls.forEach((urlData) => {
-    const urlElement = urlset.ele("url"); // Append to urlset
+    const urlElement = urlset.ele("url");
     urlElement.ele("loc").txt(urlData.loc);
     if (urlData.lastmod) urlElement.ele("lastmod").txt(urlData.lastmod);
     if (urlData.changefreq)
@@ -172,16 +175,19 @@ function generateSitemapXML(urls) {
 }
 
 function generateSitemapIndexXML(sitemapLocations) {
-  const doc = create({ version: "1.0", encoding: "UTF-8" });
-  doc.pi("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"'); // Use doc.pi()
+  // Create the document and then add the processing instruction
+  const doc = create({ version: "1.0", encoding: "UTF-8" }).pro(
+    "xml-stylesheet",
+    'type="text/xsl" href="/sitemap.xsl"'
+  ); // Use .pro() for document-level PI
 
+  // Now create the root element as a child of the document
   const sitemapindex = doc.ele("sitemapindex", {
-    // Create root element
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
   });
 
   sitemapLocations.forEach((locData) => {
-    const sitemapElement = sitemapindex.ele("sitemap"); // Append to sitemapindex
+    const sitemapElement = sitemapindex.ele("sitemap");
     sitemapElement.ele("loc").txt(locData.loc);
     if (locData.lastmod) sitemapElement.ele("lastmod").txt(locData.lastmod);
   });
