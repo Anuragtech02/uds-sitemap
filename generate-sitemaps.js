@@ -143,26 +143,29 @@ function getPageUrl(
 
 function generateSitemapXML(urls) {
   const doc = create({ version: "1.0", encoding: "UTF-8" });
-  doc.instruction("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"');
+  doc.pi("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"'); // Use doc.pi()
+
   const urlset = doc.ele("urlset", {
+    // Create root element
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
     "xmlns:xhtml": "http://www.w3.org/1999/xhtml",
   });
+
   urls.forEach((urlData) => {
-    const urlElement = urlset.ele("url");
+    const urlElement = urlset.ele("url"); // Append to urlset
     urlElement.ele("loc").txt(urlData.loc);
     if (urlData.lastmod) urlElement.ele("lastmod").txt(urlData.lastmod);
     if (urlData.changefreq)
       urlElement.ele("changefreq").txt(urlData.changefreq);
     if (urlData.priority) urlElement.ele("priority").txt(urlData.priority);
     if (urlData.alternates && urlData.alternates.length > 0) {
-      urlData.alternates.forEach((alt) =>
+      urlData.alternates.forEach((alt) => {
         urlElement.ele("xhtml:link", {
           rel: "alternate",
           hreflang: alt.hreflang,
           href: alt.href,
-        })
-      );
+        });
+      });
     }
   });
   return doc.end({ prettyPrint: true });
@@ -170,12 +173,15 @@ function generateSitemapXML(urls) {
 
 function generateSitemapIndexXML(sitemapLocations) {
   const doc = create({ version: "1.0", encoding: "UTF-8" });
-  doc.instruction("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"');
+  doc.pi("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"'); // Use doc.pi()
+
   const sitemapindex = doc.ele("sitemapindex", {
+    // Create root element
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
   });
+
   sitemapLocations.forEach((locData) => {
-    const sitemapElement = sitemapindex.ele("sitemap");
+    const sitemapElement = sitemapindex.ele("sitemap"); // Append to sitemapindex
     sitemapElement.ele("loc").txt(locData.loc);
     if (locData.lastmod) sitemapElement.ele("lastmod").txt(locData.lastmod);
   });
