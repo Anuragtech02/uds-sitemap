@@ -20,89 +20,88 @@ const CONTENT_TYPES_CONFIG = [
     type: "collection",
     apiSlug: "reports",
     pathPrefix: "reports",
-    priority: "0.7",
+    priority: "0.9",
     changefreq: "weekly",
   },
   {
     type: "collection",
     apiSlug: "news-articles",
     pathPrefix: "news",
-    priority: "0.8",
+    priority: "0.9",
     changefreq: "daily",
   },
   {
     type: "collection",
     apiSlug: "blogs",
     pathPrefix: "blog",
-    priority: "0.6",
+    priority: "0.9",
     changefreq: "monthly",
   },
 
-  // Single Types (Ensure apiSlug matches the API ID in Strapi)
-  // defaultUrlPath is the URL segment for the default language. For homepage, it's ''.
-  // These single types are assumed NOT to use a custom 'slug' field from Strapi for their URL path.
-  {
-    type: "single",
-    apiSlug: "home-page",
-    defaultUrlPath: "",
-    priority: "1.0",
-    changefreq: "daily",
-  },
+  // Actual Single Types from Strapi (EXCLUDING a placeholder for the homepage if it's not fetched from Strapi as a specific 'home-page-api' type)
   {
     type: "single",
     apiSlug: "about-page",
     defaultUrlPath: "about",
-    priority: "0.5",
+    priority: "0.7",
     changefreq: "yearly",
+    sitemapFileKeyBase: "single-pages",
   },
   {
     type: "single",
     apiSlug: "cancellation-policy",
     defaultUrlPath: "cancellation-policy",
-    priority: "0.3",
+    priority: "0.5",
     changefreq: "yearly",
+    sitemapFileKeyBase: "single-pages",
   },
   {
     type: "single",
     apiSlug: "contact-page",
     defaultUrlPath: "contact",
-    priority: "0.5",
+    priority: "0.7",
     changefreq: "yearly",
+    sitemapFileKeyBase: "single-pages",
   },
   {
     type: "single",
     apiSlug: "disclaimer",
     defaultUrlPath: "disclaimer",
-    priority: "0.3",
+    priority: "0.5",
     changefreq: "yearly",
+    sitemapFileKeyBase: "single-pages",
   },
   {
     type: "single",
     apiSlug: "legal",
     defaultUrlPath: "legal",
-    priority: "0.3",
+    priority: "0.5",
     changefreq: "yearly",
+    sitemapFileKeyBase: "single-pages",
   },
   {
     type: "single",
     apiSlug: "privacy-policy",
     defaultUrlPath: "privacy-policy",
-    priority: "0.3",
+    priority: "0.5",
     changefreq: "yearly",
+    sitemapFileKeyBase: "single-pages",
   },
   {
     type: "single",
     apiSlug: "services-page",
     defaultUrlPath: "services",
-    priority: "0.7",
+    priority: "0.8",
     changefreq: "monthly",
+    sitemapFileKeyBase: "single-pages",
   },
   {
     type: "single",
     apiSlug: "t-and-c",
     defaultUrlPath: "terms-and-conditions",
-    priority: "0.3",
+    priority: "0.5",
     changefreq: "yearly",
+    sitemapFileKeyBase: "single-pages",
   },
 ];
 
@@ -110,13 +109,10 @@ const OUTPUT_DIR = process.env.SITEMAP_OUTPUT_DIR;
 const SITEMAP_URL_LIMIT = 45000;
 const STRAPI_PAGE_SIZE = 100;
 const STATE_FILE_PATH = path.join(OUTPUT_DIR, "sitemap_state.json");
-
 const SCRIPT_MODE = process.env.SITEMAP_GENERATION_MODE || "full";
 
 if (!STRAPI_API_URL || !STRAPI_API_TOKEN || !SITE_BASE_URL || !OUTPUT_DIR) {
-  console.error(
-    "Error: Missing required environment variables (STRAPI_API_URL, STRAPI_API_TOKEN, SITE_BASE_URL, SITEMAP_OUTPUT_DIR)."
-  );
+  console.error("Error: Missing required environment variables.");
   process.exit(1);
 }
 
@@ -124,8 +120,6 @@ const axiosInstance = axios.create({
   baseURL: STRAPI_API_URL,
   headers: { Authorization: `Bearer ${STRAPI_API_TOKEN}` },
 });
-
-// --- Helper Functions ---
 
 function getPageUrl(
   language,
@@ -135,60 +129,57 @@ function getPageUrl(
 ) {
   const langPrefix =
     language === DEFAULT_LANGUAGE || language === "" ? "" : `/${language}`;
-
   if (itemType === "single") {
-    if (
-      pathSegment === "" ||
+    return pathSegment === "" ||
       pathSegment === null ||
       typeof pathSegment === "undefined"
-    ) {
-      return langPrefix === ""
+      ? langPrefix === ""
         ? `${SITE_BASE_URL}/`
-        : `${SITE_BASE_URL}${langPrefix}`;
-    }
-    return `${SITE_BASE_URL}${langPrefix}/${pathSegment}`;
-  } else {
-    // collection
-    return `${SITE_BASE_URL}${langPrefix}/${pathSegment}/${slugIfCollection}`;
+        : `${SITE_BASE_URL}${langPrefix}`
+      : `${SITE_BASE_URL}${langPrefix}/${pathSegment}`;
   }
+  return `${SITE_BASE_URL}${langPrefix}/${pathSegment}/${slugIfCollection}`;
 }
 
 function generateSitemapXML(urls) {
-  const root = create({ version: "1.0", encoding: "UTF-8" }).ele("urlset", {
+  const doc = create({ version: "1.0", encoding: "UTF-8" });
+  doc.instruction("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"');
+  const urlset = doc.ele("urlset", {
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
     "xmlns:xhtml": "http://www.w3.org/1999/xhtml",
   });
   urls.forEach((urlData) => {
-    const urlElement = root.ele("url");
+    const urlElement = urlset.ele("url");
     urlElement.ele("loc").txt(urlData.loc);
     if (urlData.lastmod) urlElement.ele("lastmod").txt(urlData.lastmod);
     if (urlData.changefreq)
       urlElement.ele("changefreq").txt(urlData.changefreq);
     if (urlData.priority) urlElement.ele("priority").txt(urlData.priority);
     if (urlData.alternates && urlData.alternates.length > 0) {
-      urlData.alternates.forEach((alt) => {
+      urlData.alternates.forEach((alt) =>
         urlElement.ele("xhtml:link", {
           rel: "alternate",
           hreflang: alt.hreflang,
           href: alt.href,
-        });
-      });
+        })
+      );
     }
   });
-  return root.end({ prettyPrint: true });
+  return doc.end({ prettyPrint: true });
 }
 
 function generateSitemapIndexXML(sitemapLocations) {
-  const root = create({ version: "1.0", encoding: "UTF-8" }).ele(
-    "sitemapindex",
-    { xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9" }
-  );
+  const doc = create({ version: "1.0", encoding: "UTF-8" });
+  doc.instruction("xml-stylesheet", 'type="text/xsl" href="/sitemap.xsl"');
+  const sitemapindex = doc.ele("sitemapindex", {
+    xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
+  });
   sitemapLocations.forEach((locData) => {
-    const sitemapElement = root.ele("sitemap");
+    const sitemapElement = sitemapindex.ele("sitemap");
     sitemapElement.ele("loc").txt(locData.loc);
     if (locData.lastmod) sitemapElement.ele("lastmod").txt(locData.lastmod);
   });
-  return root.end({ prettyPrint: true });
+  return doc.end({ prettyPrint: true });
 }
 
 function readExistingSitemap(filepath) {
@@ -209,12 +200,11 @@ function readExistingSitemap(filepath) {
             ?.text();
           const alternates = [];
           el.forEach((child) => {
-            if (child.node.nodeName === "xhtml:link") {
+            if (child.node.nodeName === "xhtml:link")
               alternates.push({
                 hreflang: child.node.getAttribute("hreflang"),
                 href: child.node.getAttribute("href"),
               });
-            }
           }, true);
           urls.set(loc, {
             loc,
@@ -244,16 +234,15 @@ async function fetchStrapiCollectionEntries(
   sinceTimestamp = null
 ) {
   console.log(
-    `Fetching collection ${contentTypeApiSlug} for language: ${language}${
+    `Fetching collection ${contentTypeApiSlug} for lang: ${language}${
       sinceTimestamp
         ? ` since ${new Date(sinceTimestamp).toISOString()}`
-        : " (full fetch)"
+        : " (full)"
     }`
   );
   let allEntries = [];
   let page = 1;
   let totalPages = 1;
-
   const params = {
     locale: language,
     "fields[0]": "slug",
@@ -266,11 +255,8 @@ async function fetchStrapiCollectionEntries(
     "sort[0]": "updatedAt:desc",
     publicationState: "live",
   };
-
-  if (sinceTimestamp) {
+  if (sinceTimestamp)
     params["filters[updatedAt][$gt]"] = new Date(sinceTimestamp).toISOString();
-  }
-
   try {
     do {
       params["pagination[page]"] = page;
@@ -279,79 +265,57 @@ async function fetchStrapiCollectionEntries(
       });
       if (response.data && response.data.data) {
         allEntries = allEntries.concat(response.data.data);
-        if (page === 1 && response.data.meta && response.data.meta.pagination) {
+        if (page === 1 && response.data.meta?.pagination)
           totalPages = response.data.meta.pagination.pageCount;
-        }
         console.log(
-          `Fetched page ${page}/${totalPages} for ${contentTypeApiSlug} (${language}) - ${response.data.data.length} items`
+          `Fetched pg ${page}/${totalPages} for ${contentTypeApiSlug} (${language}) - ${response.data.data.length} items`
         );
-      } else {
-        break;
-      }
+      } else break;
       page++;
     } while (page <= totalPages);
-  } catch (error) {
+  } catch (e) {
     console.error(
-      `Error fetching Strapi collection entries for ${contentTypeApiSlug} (${language}):`,
-      error.response ? error.response.data : error.message
+      `Error fetching ${contentTypeApiSlug} (${language}):`,
+      e.response?.data || e.message
     );
   }
   console.log(
-    `Finished fetching collection ${contentTypeApiSlug} for ${language}. Total entries: ${allEntries.length}`
+    `Finished ${contentTypeApiSlug} (${language}). Total: ${allEntries.length}`
   );
   return allEntries;
 }
 
 async function fetchStrapiSingleEntry(singleTypeApiSlug, language) {
-  console.log(
-    `Fetching single type ${singleTypeApiSlug} for language: ${language}`
-  );
+  console.log(`Fetching single ${singleTypeApiSlug} for lang: ${language}`);
   try {
     const params = {
       locale: language,
-      "populate[localizations][fields][0]": "locale", // Only need locale from localizations for path construction
+      "populate[localizations][fields][0]": "locale",
       "fields[0]": "updatedAt",
       "fields[1]": "locale",
       "fields[2]": "publishedAt",
       publicationState: "live",
     };
-
     const response = await axiosInstance.get(`/api/${singleTypeApiSlug}`, {
       params,
     });
-
-    if (
-      response.data &&
-      response.data.data &&
-      response.data.data.attributes &&
-      response.data.data.attributes.publishedAt
-    ) {
-      return response.data.data;
-    } else {
-      console.log(
-        `Single type ${singleTypeApiSlug} (${language}) not found or not published.`
-      );
-      return null;
-    }
-  } catch (error) {
-    if (error.response && error.response.status === 404) {
-      console.log(
-        `Single type ${singleTypeApiSlug} (${language}) not found (404).`
-      );
-    } else if (
-      error.response &&
-      error.response.data &&
-      error.response.data.error
-    ) {
+    if (response.data?.data?.attributes?.publishedAt) return response.data.data;
+    console.log(
+      `Single ${singleTypeApiSlug} (${language}) not found/published.`
+    );
+    return null;
+  } catch (e) {
+    if (e.response?.status === 404)
+      console.log(`Single ${singleTypeApiSlug} (${language}) not found (404).`);
+    else if (e.response?.data?.error)
       console.error(
-        `Error fetching Strapi single entry ${singleTypeApiSlug} (${language}): Status ${error.response.data.error.status} - ${error.response.data.error.message}`
+        `Error fetching ${singleTypeApiSlug} (${language}): Status ${e.response.data.error.status} - ${e.response.data.error.message}`
       );
-    } else {
+    else
       console.error(
-        `Error fetching Strapi single entry ${singleTypeApiSlug} (${language}):`,
-        error.message
+        `Error fetching ${singleTypeApiSlug} (${language}):`,
+        e.message
       );
-    }
     return null;
   }
 }
@@ -361,7 +325,7 @@ function loadLastRunState() {
     try {
       return JSON.parse(fs.readFileSync(STATE_FILE_PATH, "utf-8"));
     } catch (e) {
-      console.warn("Could not read/parse sitemap_state.json:", e.message);
+      console.warn("Could not read state:", e.message);
     }
   }
   return { lastSuccessfulRunTimestamp: null };
@@ -373,71 +337,70 @@ function saveLastRunState(timestamp) {
       STATE_FILE_PATH,
       JSON.stringify({ lastSuccessfulRunTimestamp: timestamp })
     );
-    console.log(
-      `Saved last successful run timestamp: ${new Date(
-        timestamp
-      ).toISOString()}`
-    );
+    console.log(`Saved state: ${new Date(timestamp).toISOString()}`);
   } catch (e) {
-    console.error("Could not write sitemap_state.json:", e.message);
+    console.error("Could not write state:", e.message);
   }
 }
 
-// --- Main Logic ---
 async function main() {
-  console.log(`Starting sitemap generation in "${SCRIPT_MODE}" mode...`);
+  console.log(`Starting sitemap gen in "${SCRIPT_MODE}" mode...`);
   const startTime = Date.now();
   let lastRunTimestamp = null;
-
   if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
-
   if (SCRIPT_MODE === "full") {
-    console.log("Full mode: Cleaning existing sitemap files and state.");
+    console.log("Full mode: Cleaning sitemaps & state.");
     fs.readdirSync(OUTPUT_DIR).forEach((f) => {
-      if (f.endsWith(".xml") || f === "sitemap_state.json") {
+      if (f.endsWith(".xml") || f === "sitemap_state.json")
         try {
           fs.rmSync(path.join(OUTPUT_DIR, f));
         } catch (e) {
-          console.warn(`Could not remove ${f}: ${e.message}`);
+          console.warn(`Could not rm ${f}: ${e.message}`);
         }
-      }
     });
   } else {
     const state = loadLastRunState();
     lastRunTimestamp = state.lastSuccessfulRunTimestamp;
     if (lastRunTimestamp)
       console.log(
-        `Incremental mode: Last successful run was at ${new Date(
-          lastRunTimestamp
-        ).toISOString()}`
+        `Incremental: Last run ${new Date(lastRunTimestamp).toISOString()}`
       );
-    else
-      console.warn(
-        "Incremental mode: No last run timestamp. Consider running 'full' mode first or will perform a full-like fetch for incremental."
-      );
+    else console.warn("Incremental: No last run. Full-like fetch.");
   }
-
   const allContentUrls = new Map();
-
   if (SCRIPT_MODE === "incremental") {
-    fs.readdirSync(OUTPUT_DIR).forEach((file) => {
-      if (file.endsWith(".xml") && file !== "sitemap.xml") {
-        const existingUrls = readExistingSitemap(path.join(OUTPUT_DIR, file));
-        existingUrls.forEach((value, key) => allContentUrls.set(key, value));
-      }
+    fs.readdirSync(OUTPUT_DIR).forEach((f) => {
+      if (f.endsWith(".xml") && f !== "sitemap.xml")
+        readExistingSitemap(path.join(OUTPUT_DIR, f)).forEach((v, k) =>
+          allContentUrls.set(k, v)
+        );
     });
-    console.log(
-      `Incremental: Loaded ${allContentUrls.size} existing URLs from all sitemap files.`
-    );
+    console.log(`Incremental: Loaded ${allContentUrls.size} existing URLs.`);
   }
-
   let fetchedSomethingNew = false;
+
+  console.log("Adding homepage URLs manually...");
+  LANGUAGES.forEach((lang) => {
+    const homepageLoc = getPageUrl(lang, "", "single");
+    const alternates = LANGUAGES.map((altLang) => ({
+      hreflang: altLang,
+      href: getPageUrl(altLang, "", "single"),
+    }));
+    allContentUrls.set(homepageLoc, {
+      loc: homepageLoc,
+      lastmod: new Date().toISOString(),
+      changefreq: "daily",
+      priority: "1.0",
+      alternates,
+      _sitemapFileKeyBaseForGrouping: "single-pages", // Group with other single pages
+    });
+    console.log(`Added/Updated homepage for ${lang}: ${homepageLoc}`);
+  });
 
   for (const lang of LANGUAGES) {
     for (const contentType of CONTENT_TYPES_CONFIG) {
       const isSingleType = contentType.type === "single";
       let entriesFromStrapi = [];
-
       if (isSingleType) {
         const singleEntry = await fetchStrapiSingleEntry(
           contentType.apiSlug,
@@ -455,7 +418,7 @@ async function main() {
           if (allContentUrls.has(locToRemove)) {
             allContentUrls.delete(locToRemove);
             console.log(
-              `Incremental: Removed single type URL ${locToRemove} as it's no longer found/published.`
+              `Incremental: Removed single ${locToRemove} (not found/published).`
             );
           }
         }
@@ -468,179 +431,154 @@ async function main() {
         if (collectionEntries.length > 0) fetchedSomethingNew = true;
         entriesFromStrapi.push(...collectionEntries);
       }
-
       entriesFromStrapi.forEach((entry) => {
-        let pathForUrlConstruction,
-          itemSlugForCollection = null;
-        if (isSingleType) {
-          pathForUrlConstruction = contentType.defaultUrlPath; // Always use defaultUrlPath for single types now
-          if (contentType.defaultUrlPath === "" && lang === DEFAULT_LANGUAGE)
-            pathForUrlConstruction = "";
-        } else {
-          pathForUrlConstruction = contentType.pathPrefix;
+        let pathSegment,
+          itemSlug = null;
+        if (isSingleType)
+          pathSegment =
+            contentType.defaultUrlPath === "" && lang === DEFAULT_LANGUAGE
+              ? ""
+              : contentType.defaultUrlPath;
+        else {
+          pathSegment = contentType.pathPrefix;
           if (!entry.attributes.slug) {
             console.warn(
-              `Collection entry ID ${entry.id} (${contentType.apiSlug}, ${lang}) missing slug. Skipping.`
+              `Collection ${entry.id} (${contentType.apiSlug}, ${lang}) no slug. Skip.`
             );
             return;
           }
-          itemSlugForCollection = entry.attributes.slug;
+          itemSlug = entry.attributes.slug;
         }
-
         const currentLoc = getPageUrl(
           lang,
-          pathForUrlConstruction,
+          pathSegment,
           isSingleType ? "single" : "collection",
-          itemSlugForCollection
+          itemSlug
         );
         const alternates = [{ hreflang: lang, href: currentLoc }];
-
-        if (
-          entry.attributes.localizations &&
-          entry.attributes.localizations.data
-        ) {
+        if (entry.attributes.localizations?.data) {
           entry.attributes.localizations.data.forEach((locEntry) => {
             const altLocale = locEntry.attributes.locale;
-            let altPathSegment,
-              altSlugIfCollection = null;
-            if (isSingleType) {
-              altPathSegment = contentType.defaultUrlPath; // Use defaultUrlPath for alternates too
-              if (
+            let altPath,
+              altItemSlug = null;
+            if (isSingleType)
+              altPath =
                 contentType.defaultUrlPath === "" &&
                 altLocale !== DEFAULT_LANGUAGE &&
                 altLocale !== ""
-              )
-                altPathSegment = "";
-            } else {
-              altPathSegment = contentType.pathPrefix;
+                  ? ""
+                  : contentType.defaultUrlPath;
+            else {
+              altPath = contentType.pathPrefix;
               if (!locEntry.attributes.slug) return;
-              altSlugIfCollection = locEntry.attributes.slug;
+              altItemSlug = locEntry.attributes.slug;
             }
-            if (altLocale) {
+            if (altLocale)
               alternates.push({
                 hreflang: altLocale,
                 href: getPageUrl(
                   altLocale,
-                  altPathSegment,
+                  altPath,
                   isSingleType ? "single" : "collection",
-                  altSlugIfCollection
+                  altItemSlug
                 ),
               });
-            }
           });
         }
         allContentUrls.set(currentLoc, {
           loc: currentLoc,
-          lastmod: entry.attributes.updatedAt
-            ? new Date(entry.attributes.updatedAt).toISOString()
-            : new Date().toISOString(),
+          lastmod: new Date(
+            entry.attributes.updatedAt || Date.now()
+          ).toISOString(),
           changefreq: contentType.changefreq || "monthly",
           priority: contentType.priority || "0.5",
-          alternates: alternates,
+          alternates,
+          _sitemapFileKeyBaseForGrouping: isSingleType
+            ? contentType.sitemapFileKeyBase
+            : contentType.apiSlug,
         });
       });
     }
   }
-
   if (SCRIPT_MODE === "incremental" && lastRunTimestamp) {
-    console.log("Incremental: Performing deletion checks for collections...");
-    const liveCollectionItemLocs = new Set();
+    console.log("Incremental: Deletion checks for collections...");
+    const liveLocs = new Set();
     for (const lang of LANGUAGES) {
-      for (const contentType of CONTENT_TYPES_CONFIG.filter(
-        (ct) => ct.type === "collection"
+      for (const ct of CONTENT_TYPES_CONFIG.filter(
+        (c) => c.type === "collection"
       )) {
-        const allCurrentLiveEntries = await fetchStrapiCollectionEntries(
-          contentType.apiSlug,
-          lang,
-          null
-        );
-        allCurrentLiveEntries.forEach((entry) => {
-          if (entry.attributes.slug) {
-            liveCollectionItemLocs.add(
-              getPageUrl(
-                lang,
-                contentType.pathPrefix,
-                "collection",
-                entry.attributes.slug
-              )
-            );
+        (await fetchStrapiCollectionEntries(ct.apiSlug, lang, null)).forEach(
+          (e) => {
+            if (e.attributes.slug)
+              liveLocs.add(
+                getPageUrl(lang, ct.pathPrefix, "collection", e.attributes.slug)
+              );
           }
-        });
+        );
       }
     }
-
-    const urlsToDelete = [];
-    allContentUrls.forEach((urlData, locKey) => {
-      const isPotentiallyCollection = CONTENT_TYPES_CONFIG.some(
-        (ct) =>
-          ct.type === "collection" && locKey.includes(`/${ct.pathPrefix}/`)
-      );
-      if (isPotentiallyCollection && !liveCollectionItemLocs.has(locKey)) {
-        urlsToDelete.push(locKey);
-      }
+    const toDelete = [];
+    allContentUrls.forEach((urlData, k) => {
+      if (
+        CONTENT_TYPES_CONFIG.some(
+          (c) => c.type === "collection" && k.includes(`/${c.pathPrefix}/`)
+        ) &&
+        !liveLocs.has(k)
+      )
+        toDelete.push(k);
     });
-
-    if (urlsToDelete.length > 0) {
+    if (toDelete.length > 0) {
       console.log(
-        `Incremental: Found ${urlsToDelete.length} collection URLs to remove.`
+        `Incremental: Found ${toDelete.length} collection URLs to remove.`
       );
-      urlsToDelete.forEach((locKey) => allContentUrls.delete(locKey));
+      toDelete.forEach((k) => allContentUrls.delete(k));
     }
   }
-
-  const finalUrlListForAllSitemaps = Array.from(allContentUrls.values());
-  const sitemapFileRegistry = [];
-  const urlsBySitemapFileKey = new Map();
-
-  finalUrlListForAllSitemaps.forEach((urlData) => {
-    let fileKey = "other-pages";
+  console.log(
+    `>>>> Reached point just before Array.from(allContentUrls.values()). Size: ${allContentUrls.size}`
+  );
+  const finalUrls = Array.from(allContentUrls.values());
+  const sitemapRegistry = [];
+  const urlsByFileKey = new Map();
+  finalUrls.forEach((urlData) => {
+    let fileKey = "other-uncategorized-pages";
     const locPath = new URL(urlData.loc).pathname;
-    const currentEntryLang =
+    const entryLang =
       LANGUAGES.find((l) => locPath.startsWith(`/${l}/`)) || DEFAULT_LANGUAGE;
 
-    for (const ct of CONTENT_TYPES_CONFIG) {
-      if (ct.type === "collection" && locPath.includes(`/${ct.pathPrefix}/`)) {
-        fileKey = `${ct.apiSlug}-${currentEntryLang}`;
-        break;
-      } else if (ct.type === "single") {
-        let expectedPathForSingle = getPageUrl(
-          currentEntryLang,
-          ct.defaultUrlPath,
-          "single"
-        ).replace(SITE_BASE_URL, "");
-        if (currentEntryLang === DEFAULT_LANGUAGE && ct.defaultUrlPath === "") {
-          // Homepage default lang
-          expectedPathForSingle = "/";
-        } else if (
-          currentEntryLang !== DEFAULT_LANGUAGE &&
-          ct.defaultUrlPath === ""
+    if (urlData._sitemapFileKeyBaseForGrouping) {
+      // Use this if present (set for homepage and fetched single types)
+      fileKey = `${urlData._sitemapFileKeyBaseForGrouping}-${entryLang}`;
+    } else {
+      // Fallback for collections (though it should also have _sitemapFileKeyBaseForGrouping if set above)
+      for (const ct of CONTENT_TYPES_CONFIG) {
+        if (
+          ct.type === "collection" &&
+          locPath.includes(`/${ct.pathPrefix}/`)
         ) {
-          // Homepage other lang
-          expectedPathForSingle = `/${currentEntryLang}`;
-        }
-
-        if (locPath === expectedPathForSingle) {
-          fileKey = `single-${ct.apiSlug}-${currentEntryLang}`;
+          fileKey = `${ct.apiSlug}-${entryLang}`;
           break;
         }
       }
     }
-    if (!urlsBySitemapFileKey.has(fileKey))
-      urlsBySitemapFileKey.set(fileKey, []);
-    urlsBySitemapFileKey.get(fileKey).push(urlData);
+    if (!urlsByFileKey.has(fileKey)) urlsByFileKey.set(fileKey, []);
+    urlsByFileKey.get(fileKey).push(urlData);
   });
-
+  console.log(`Finished grouping. ${urlsByFileKey.size} sitemap groups.`);
   fs.readdirSync(OUTPUT_DIR).forEach((f) => {
-    if (f.endsWith(".xml") && f !== "sitemap.xml") {
+    if (f.endsWith(".xml") && f !== "sitemap.xml")
       try {
         fs.rmSync(path.join(OUTPUT_DIR, f));
       } catch (e) {
-        console.warn(`Could not remove old sitemap part ${f}: ${e.message}`);
+        console.warn(`Could not rm ${f}: ${e.message}`);
       }
-    }
   });
-
-  urlsBySitemapFileKey.forEach((urlList, fileKeyBase) => {
+  console.log("Removed old sitemap parts. Writing new ones...");
+  urlsByFileKey.forEach((urlList, fileKeyBase) => {
+    if (urlList.length === 0) {
+      console.log(`Skipping empty sitemap group: ${fileKeyBase}`);
+      return;
+    }
     for (let i = 0; i < urlList.length; i += SITEMAP_URL_LIMIT) {
       const chunk = urlList.slice(i, i + SITEMAP_URL_LIMIT);
       const partSuffix =
@@ -648,51 +586,45 @@ async function main() {
           ? `-${Math.floor(i / SITEMAP_URL_LIMIT) + 1}`
           : "";
       const sitemapFilename = `${fileKeyBase}${partSuffix}.xml`;
-      const sitemapFilepath = path.join(OUTPUT_DIR, sitemapFilename);
-
       const xmlContent = generateSitemapXML(chunk);
-      fs.writeFileSync(sitemapFilepath, xmlContent);
+      fs.writeFileSync(path.join(OUTPUT_DIR, sitemapFilename), xmlContent);
       console.log(
         `Generated sitemap: ${sitemapFilename} with ${chunk.length} URLs`
       );
-      sitemapFileRegistry.push({
+      sitemapRegistry.push({
         loc: `${SITE_BASE_URL}/sitemaps/${sitemapFilename}`,
         lastmod: new Date().toISOString(),
       });
     }
   });
-
-  if (sitemapFileRegistry.length > 0) {
-    const indexXmlContent = generateSitemapIndexXML(sitemapFileRegistry);
-    fs.writeFileSync(path.join(OUTPUT_DIR, "sitemap.xml"), indexXmlContent);
+  console.log("Finished writing sitemaps. Generating index...");
+  if (sitemapRegistry.length > 0) {
+    fs.writeFileSync(
+      path.join(OUTPUT_DIR, "sitemap.xml"),
+      generateSitemapIndexXML(sitemapRegistry)
+    );
     console.log(
-      `Generated sitemap index: sitemap.xml with ${sitemapFileRegistry.length} sitemap file(s)`
+      `Generated index: sitemap.xml with ${sitemapRegistry.length} files`
     );
   } else {
-    console.log(
-      "No sitemap files generated. Removing sitemap.xml if it exists."
-    );
-    if (fs.existsSync(path.join(OUTPUT_DIR, "sitemap.xml"))) {
+    console.log("No sitemaps generated. Removing index if exists.");
+    if (fs.existsSync(path.join(OUTPUT_DIR, "sitemap.xml")))
       fs.rmSync(path.join(OUTPUT_DIR, "sitemap.xml"));
-    }
   }
-
   if (
     SCRIPT_MODE === "full" ||
     (SCRIPT_MODE === "incremental" && fetchedSomethingNew) ||
     (SCRIPT_MODE === "incremental" && !lastRunTimestamp)
-  ) {
+  )
     saveLastRunState(startTime);
-  }
-
   console.log(
-    `Sitemap generation (${SCRIPT_MODE}) finished in ${
+    `Sitemap gen (${SCRIPT_MODE}) finished in ${
       (Date.now() - startTime) / 1000
     }s!`
   );
 }
-
 main().catch((error) => {
-  console.error(`Sitemap generation (${SCRIPT_MODE}) failed:`, error);
+  console.error(`Sitemap gen (${SCRIPT_MODE}) FAILED:`, error);
+  console.error("Stack:", error.stack);
   process.exit(1);
 });
