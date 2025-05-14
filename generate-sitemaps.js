@@ -15,7 +15,6 @@ const LANGUAGES = (process.env.LANGUAGES || "en")
 const DEFAULT_LANGUAGE = LANGUAGES[0];
 
 const CONTENT_TYPES_CONFIG = [
-  // Collections
   {
     type: "collection",
     apiSlug: "reports",
@@ -28,17 +27,15 @@ const CONTENT_TYPES_CONFIG = [
     apiSlug: "news-articles",
     pathPrefix: "news",
     priority: "0.9",
-    changefreq: "daily",
+    changefreq: "weekly",
   },
   {
     type: "collection",
     apiSlug: "blogs",
-    pathPrefix: "blog",
+    pathPrefix: "blogs",
     priority: "0.9",
     changefreq: "monthly",
   },
-
-  // Actual Single Types from Strapi (EXCLUDING a placeholder for the homepage if it's not fetched from Strapi as a specific 'home-page-api' type)
   {
     type: "single",
     apiSlug: "about-page",
@@ -142,16 +139,14 @@ function getPageUrl(
 }
 
 function generateSitemapXML(urls) {
-  // Create the document and then add the processing instruction
-  const doc = create({ version: "1.0", encoding: "UTF-8" });
+  const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8"?>';
+  // const stylesheetPI = '<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>'; // Removed stylesheet for simplicity now
 
-  // Now create the root element as a child of the document
+  const doc = create(); // Create without version/encoding initially
+
   const urlset = doc.ele("urlset", {
-    "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-    "xsi:schemaLocation":
-      "http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd http://www.w3.org/TR/xhtml11/xhtml11_schema.html http://www.w3.org/2002/08/xhtml/xhtml1-strict.xsd",
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
-    "xmlns:xhtml": "http://www.w3.org/TR/xhtml11/xhtml11_schema.html",
+    // No xmlns:xhtml needed as we are removing xhtml:link tags
   });
 
   urls.forEach((urlData) => {
@@ -161,27 +156,21 @@ function generateSitemapXML(urls) {
     if (urlData.changefreq)
       urlElement.ele("changefreq").txt(urlData.changefreq);
     if (urlData.priority) urlElement.ele("priority").txt(urlData.priority);
-    if (urlData.alternates && urlData.alternates.length > 0) {
-      urlData.alternates.forEach((alt) => {
-        urlElement.ele("xhtml:link", {
-          rel: "alternate",
-          hreflang: alt.hreflang,
-          href: alt.href,
-        });
-      });
-    }
+    // The xhtml:link block is removed
   });
-  return doc.end({ prettyPrint: true });
+
+  const xmlBody = doc.end({ prettyPrint: true });
+  // return `${xmlDeclaration}\n${stylesheetPI}\n${xmlBody}`;
+  return `${xmlDeclaration}\n${xmlBody}`;
 }
 
 function generateSitemapIndexXML(sitemapLocations) {
-  // Create the document and then add the processing instruction
-  const doc = create({ version: "1.0", encoding: "UTF-8" });
+  const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8"?>';
+  // const stylesheetPI = '<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>'; // Removed stylesheet
+
+  const doc = create();
 
   const sitemapindex = doc.ele("sitemapindex", {
-    "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
-    "xsi:schemaLocation":
-      "http://www.sitemaps.org/schemas/sitemap/0.9 http://www.sitemaps.org/schemas/sitemap/0.9/sitemap.xsd",
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
   });
 
@@ -190,7 +179,10 @@ function generateSitemapIndexXML(sitemapLocations) {
     sitemapElement.ele("loc").txt(locData.loc);
     if (locData.lastmod) sitemapElement.ele("lastmod").txt(locData.lastmod);
   });
-  return doc.end({ prettyPrint: true });
+
+  const xmlBody = doc.end({ prettyPrint: true });
+  // return `${xmlDeclaration}\n${stylesheetPI}\n${xmlBody}`;
+  return `${xmlDeclaration}\n${xmlBody}`;
 }
 
 function readExistingSitemap(filepath) {
@@ -209,18 +201,10 @@ function readExistingSitemap(filepath) {
           const lastmod = el
             .find((c) => c.node.nodeName === "lastmod", null, true)
             ?.text();
-          const alternates = [];
-          el.forEach((child) => {
-            if (child.node.nodeName === "xhtml:link")
-              alternates.push({
-                hreflang: child.node.getAttribute("hreflang"),
-                href: child.node.getAttribute("href"),
-              });
-          }, true);
+          // No alternates to read
           urls.set(loc, {
             loc,
             lastmod,
-            alternates,
             changefreq: el
               .find((c) => c.node.nodeName === "changefreq", null, true)
               ?.text(),
@@ -254,14 +238,13 @@ async function fetchStrapiCollectionEntries(
   let allEntries = [];
   let page = 1;
   let totalPages = 1;
+  // We no longer need to populate localizations if we're not building xhtml:link alternates
   const params = {
     locale: language,
     "fields[0]": "slug",
     "fields[1]": "updatedAt",
     "fields[2]": "locale",
-    "populate[localizations][fields][0]": "slug",
-    "populate[localizations][fields][1]": "locale",
-    "pagination[page]": page,
+    /* Removed 'populate[localizations]' */ "pagination[page]": page,
     "pagination[pageSize]": STRAPI_PAGE_SIZE,
     "sort[0]": "updatedAt:desc",
     publicationState: "live",
@@ -299,10 +282,10 @@ async function fetchStrapiCollectionEntries(
 async function fetchStrapiSingleEntry(singleTypeApiSlug, language) {
   console.log(`Fetching single ${singleTypeApiSlug} for lang: ${language}`);
   try {
+    // We no longer need to populate localizations if we're not building xhtml:link alternates
     const params = {
       locale: language,
-      "populate[localizations][fields][0]": "locale",
-      "fields[0]": "updatedAt",
+      /* Removed 'populate[localizations]' */ "fields[0]": "updatedAt",
       "fields[1]": "locale",
       "fields[2]": "publishedAt",
       publicationState: "live",
@@ -393,17 +376,14 @@ async function main() {
   console.log("Adding homepage URLs manually...");
   LANGUAGES.forEach((lang) => {
     const homepageLoc = getPageUrl(lang, "", "single");
-    const alternates = LANGUAGES.map((altLang) => ({
-      hreflang: altLang,
-      href: getPageUrl(altLang, "", "single"),
-    }));
+    // No alternates array needed here if we're not using xhtml:link
     allContentUrls.set(homepageLoc, {
       loc: homepageLoc,
       lastmod: new Date().toISOString(),
       changefreq: "daily",
       priority: "1.0",
-      alternates,
-      _sitemapFileKeyBaseForGrouping: "single-pages", // Group with other single pages
+      // alternates: undefined, // Explicitly undefined or just omit
+      _sitemapFileKeyBaseForGrouping: "single-pages",
     });
     console.log(`Added/Updated homepage for ${lang}: ${homepageLoc}`);
   });
@@ -466,36 +446,7 @@ async function main() {
           isSingleType ? "single" : "collection",
           itemSlug
         );
-        const alternates = [{ hreflang: lang, href: currentLoc }];
-        if (entry.attributes.localizations?.data) {
-          entry.attributes.localizations.data.forEach((locEntry) => {
-            const altLocale = locEntry.attributes.locale;
-            let altPath,
-              altItemSlug = null;
-            if (isSingleType)
-              altPath =
-                contentType.defaultUrlPath === "" &&
-                altLocale !== DEFAULT_LANGUAGE &&
-                altLocale !== ""
-                  ? ""
-                  : contentType.defaultUrlPath;
-            else {
-              altPath = contentType.pathPrefix;
-              if (!locEntry.attributes.slug) return;
-              altItemSlug = locEntry.attributes.slug;
-            }
-            if (altLocale)
-              alternates.push({
-                hreflang: altLocale,
-                href: getPageUrl(
-                  altLocale,
-                  altPath,
-                  isSingleType ? "single" : "collection",
-                  altItemSlug
-                ),
-              });
-          });
-        }
+        // No alternates array population needed
         allContentUrls.set(currentLoc, {
           loc: currentLoc,
           lastmod: new Date(
@@ -503,7 +454,7 @@ async function main() {
           ).toISOString(),
           changefreq: contentType.changefreq || "monthly",
           priority: contentType.priority || "0.5",
-          alternates,
+          // alternates: undefined, // Explicitly undefined or just omit
           _sitemapFileKeyBaseForGrouping: isSingleType
             ? contentType.sitemapFileKeyBase
             : contentType.apiSlug,
@@ -556,12 +507,9 @@ async function main() {
     const locPath = new URL(urlData.loc).pathname;
     const entryLang =
       LANGUAGES.find((l) => locPath.startsWith(`/${l}/`)) || DEFAULT_LANGUAGE;
-
     if (urlData._sitemapFileKeyBaseForGrouping) {
-      // Use this if present (set for homepage and fetched single types)
       fileKey = `${urlData._sitemapFileKeyBaseForGrouping}-${entryLang}`;
     } else {
-      // Fallback for collections (though it should also have _sitemapFileKeyBaseForGrouping if set above)
       for (const ct of CONTENT_TYPES_CONFIG) {
         if (
           ct.type === "collection" &&
@@ -597,7 +545,7 @@ async function main() {
           ? `-${Math.floor(i / SITEMAP_URL_LIMIT) + 1}`
           : "";
       const sitemapFilename = `${fileKeyBase}${partSuffix}.xml`;
-      const xmlContent = generateSitemapXML(chunk);
+      const xmlContent = generateSitemapXML(chunk); // This function now generates simpler XML
       fs.writeFileSync(path.join(OUTPUT_DIR, sitemapFilename), xmlContent);
       console.log(
         `Generated sitemap: ${sitemapFilename} with ${chunk.length} URLs`
@@ -613,7 +561,7 @@ async function main() {
     fs.writeFileSync(
       path.join(OUTPUT_DIR, "sitemap.xml"),
       generateSitemapIndexXML(sitemapRegistry)
-    );
+    ); // This function also simpler
     console.log(
       `Generated index: sitemap.xml with ${sitemapRegistry.length} files`
     );
