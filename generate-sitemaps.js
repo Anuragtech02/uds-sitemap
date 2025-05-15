@@ -138,15 +138,13 @@ function getPageUrl(
   return `${SITE_BASE_URL}${langPrefix}/${pathSegment}/${slugIfCollection}`;
 }
 
-function generateSitemapXML(urls) {
-  const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8"?>';
-  // const stylesheetPI = '<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>'; // Removed stylesheet for simplicity now
+// In generate-sitemaps.js
 
-  const doc = create(); // Create without version/encoding initially
+function generateSitemapXML(urls) {
+  const doc = create({ version: "1.0", encoding: "UTF-8" });
 
   const urlset = doc.ele("urlset", {
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
-    // No xmlns:xhtml needed as we are removing xhtml:link tags
   });
 
   urls.forEach((urlData) => {
@@ -156,19 +154,13 @@ function generateSitemapXML(urls) {
     if (urlData.changefreq)
       urlElement.ele("changefreq").txt(urlData.changefreq);
     if (urlData.priority) urlElement.ele("priority").txt(urlData.priority);
-    // The xhtml:link block is removed
   });
 
-  const xmlBody = doc.end({ prettyPrint: true });
-  // return `${xmlDeclaration}\n${stylesheetPI}\n${xmlBody}`;
-  return `${xmlDeclaration}\n${xmlBody}`;
+  return doc.end({ prettyPrint: true }); // This will include the correct XML declaration
 }
 
 function generateSitemapIndexXML(sitemapLocations) {
-  const xmlDeclaration = '<?xml version="1.0" encoding="UTF-8"?>';
-  // const stylesheetPI = '<?xml-stylesheet type="text/xsl" href="/sitemap.xsl"?>'; // Removed stylesheet
-
-  const doc = create();
+  const doc = create({ version: "1.0", encoding: "UTF-8" });
 
   const sitemapindex = doc.ele("sitemapindex", {
     xmlns: "http://www.sitemaps.org/schemas/sitemap/0.9",
@@ -180,9 +172,7 @@ function generateSitemapIndexXML(sitemapLocations) {
     if (locData.lastmod) sitemapElement.ele("lastmod").txt(locData.lastmod);
   });
 
-  const xmlBody = doc.end({ prettyPrint: true });
-  // return `${xmlDeclaration}\n${stylesheetPI}\n${xmlBody}`;
-  return `${xmlDeclaration}\n${xmlBody}`;
+  return doc.end({ prettyPrint: true }); // This will include the correct XML declaration
 }
 
 function readExistingSitemap(filepath) {
