@@ -179,33 +179,52 @@ function readExistingSitemap(filepath) {
   if (!fs.existsSync(filepath)) return new Map();
   try {
     const xmlString = fs.readFileSync(filepath, "utf-8");
-    const doc = create(xmlString);
+
+    // Use xmlbuilder2's convert functionality to parse existing XML
+    const { convert } = require("xmlbuilder2");
+    const parsed = convert(xmlString, { format: "object" });
+
     const urls = new Map();
-    doc.root().find(
-      (el) => el.node.nodeName === "url",
-      (el) => {
-        const loc = el
-          .find((c) => c.node.nodeName === "loc", null, true)
-          ?.text();
-        if (loc) {
-          const lastmod = el
-            .find((c) => c.node.nodeName === "lastmod", null, true)
-            ?.text();
-          // No alternates to read
+
+    // Handle the parsed object structure
+    if (parsed.urlset && parsed.urlset.url) {
+      const urlArray = Array.isArray(parsed.urlset.url)
+        ? parsed.urlset.url
+        : [parsed.urlset.url];
+
+      urlArray.forEach((urlData) => {
+        if (urlData.loc) {
+          const loc =
+            typeof urlData.loc === "string"
+              ? urlData.loc
+              : urlData.loc["#text"] || urlData.loc.toString();
+          const lastmod = urlData.lastmod
+            ? typeof urlData.lastmod === "string"
+              ? urlData.lastmod
+              : urlData.lastmod["#text"] || urlData.lastmod.toString()
+            : undefined;
+          const changefreq = urlData.changefreq
+            ? typeof urlData.changefreq === "string"
+              ? urlData.changefreq
+              : urlData.changefreq["#text"] || urlData.changefreq.toString()
+            : undefined;
+          const priority = urlData.priority
+            ? typeof urlData.priority === "string"
+              ? urlData.priority
+              : urlData.priority["#text"] || urlData.priority.toString()
+            : undefined;
+
           urls.set(loc, {
             loc,
             lastmod,
-            changefreq: el
-              .find((c) => c.node.nodeName === "changefreq", null, true)
-              ?.text(),
-            priority: el
-              .find((c) => c.node.nodeName === "priority", null, true)
-              ?.text(),
+            changefreq,
+            priority,
           });
         }
-      },
-      true
-    );
+      });
+    }
+
+    console.log(`Successfully read ${urls.size} URLs from ${filepath}`);
     return urls;
   } catch (e) {
     console.warn(`Could not parse existing sitemap ${filepath}:`, e.message);
