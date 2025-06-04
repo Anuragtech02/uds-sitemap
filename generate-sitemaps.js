@@ -351,6 +351,7 @@ async function main() {
   const startTime = Date.now();
   let lastRunTimestamp = null;
   if (!fs.existsSync(OUTPUT_DIR)) fs.mkdirSync(OUTPUT_DIR, { recursive: true });
+
   if (SCRIPT_MODE === "full") {
     console.log("Full mode: Cleaning sitemaps & state.");
     fs.readdirSync(OUTPUT_DIR).forEach((f) => {
@@ -362,54 +363,128 @@ async function main() {
         }
     });
   } else {
+    // Incremental mode
     const state = loadLastRunState();
     lastRunTimestamp = state.lastSuccessfulRunTimestamp;
     if (lastRunTimestamp)
       console.log(
         `Incremental: Last run ${new Date(lastRunTimestamp).toISOString()}`
       );
-    else console.warn("Incremental: No last run. Full-like fetch.");
+    else
+      console.warn(
+        "Incremental: No last run. Full-like fetch for new/updated items, full fetch for deletion check."
+      );
   }
-  const allContentUrls = new Map();
+
+  const allContentUrls = new Map(); // This will hold all URLs to be put in sitemaps
+
+  // In incremental mode, load existing URLs and try to derive their grouping key
   if (SCRIPT_MODE === "incremental") {
     fs.readdirSync(OUTPUT_DIR).forEach((f) => {
-      if (f.endsWith(".xml") && f !== "sitemap.xml")
-        readExistingSitemap(path.join(OUTPUT_DIR, f)).forEach((v, k) =>
-          allContentUrls.set(k, v)
+      if (f.endsWith(".xml") && f !== "sitemap.xml") {
+        const existingUrlsFromFile = readExistingSitemap(
+          path.join(OUTPUT_DIR, f)
         );
+        existingUrlsFromFile.forEach((urlDataFromXml, locKey) => {
+          const locPath = new URL(locKey).pathname;
+          const entryLang =
+            LANGUAGES.find((l) => locPath.startsWith(`/${l}/`)) ||
+            DEFAULT_LANGUAGE;
+          let derivedGroupingKey = null;
+
+          for (const ct of CONTENT_TYPES_CONFIG) {
+            if (
+              ct.type === "collection" &&
+              locPath.includes(`/${ct.pathPrefix}/`)
+            ) {
+              derivedGroupingKey = ct.apiSlug;
+              break;
+            } else if (ct.type === "single") {
+              let expectedPathForSingle = getPageUrl(
+                entryLang,
+                ct.defaultUrlPath,
+                "single"
+              ).replace(SITE_BASE_URL, "");
+              if (entryLang === DEFAULT_LANGUAGE && ct.defaultUrlPath === "") {
+                expectedPathForSingle = "/";
+              } else if (
+                entryLang !== DEFAULT_LANGUAGE &&
+                ct.defaultUrlPath === ""
+              ) {
+                expectedPathForSingle = `/${entryLang}`;
+              }
+              if (locPath === expectedPathForSingle) {
+                derivedGroupingKey = ct.sitemapFileKeyBase;
+                break;
+              }
+            }
+          }
+          if (!derivedGroupingKey) {
+            let isHomepage = false;
+            if (entryLang === DEFAULT_LANGUAGE && locPath === "/")
+              isHomepage = true;
+            else if (
+              entryLang !== DEFAULT_LANGUAGE &&
+              locPath === `/${entryLang}`
+            )
+              isHomepage = true;
+            if (isHomepage) derivedGroupingKey = "single-pages";
+          }
+
+          if (derivedGroupingKey) {
+            urlDataFromXml._sitemapFileKeyBaseForGrouping = derivedGroupingKey;
+          } else {
+            console.warn(
+              `[INCREMENTAL LOAD WARN] Could not derive grouping key for existing URL: ${locKey}. Categorizing as other.`
+            );
+            urlDataFromXml._sitemapFileKeyBaseForGrouping =
+              "other-uncategorized-pages";
+          }
+          allContentUrls.set(locKey, urlDataFromXml);
+        });
+      }
     });
-    console.log(`Incremental: Loaded ${allContentUrls.size} existing URLs.`);
+    console.log(
+      `Incremental: Loaded ${allContentUrls.size} existing URLs and derived grouping keys.`
+    );
   }
+
   let fetchedSomethingNew = false;
 
-  console.log("Adding homepage URLs manually...");
+  console.log("Adding/Updating homepage URLs manually...");
   LANGUAGES.forEach((lang) => {
     const homepageLoc = getPageUrl(lang, "", "single");
-    // No alternates array needed here if we're not using xhtml:link
     allContentUrls.set(homepageLoc, {
       loc: homepageLoc,
-      lastmod: new Date().toISOString(),
+      lastmod: new Date().toISOString(), // Homepage lastmod always current for simplicity
       changefreq: "daily",
       priority: "1.0",
-      // alternates: undefined, // Explicitly undefined or just omit
       _sitemapFileKeyBaseForGrouping: "single-pages",
     });
-    console.log(`Added/Updated homepage for ${lang}: ${homepageLoc}`);
+    // console.log(`Added/Updated homepage for ${lang}: ${homepageLoc}`); // Less verbose
   });
 
+  // Fetch new/updated items since last run (or all if no lastRunTimestamp for collections if incremental)
   for (const lang of LANGUAGES) {
     for (const contentType of CONTENT_TYPES_CONFIG) {
       const isSingleType = contentType.type === "single";
       let entriesFromStrapi = [];
+
+      const fetchSince =
+        SCRIPT_MODE === "incremental" && lastRunTimestamp
+          ? lastRunTimestamp
+          : null;
+
       if (isSingleType) {
         const singleEntry = await fetchStrapiSingleEntry(
           contentType.apiSlug,
-          lang
+          lang // Single types are always fetched fully or checked against cache, not using 'fetchSince' in fetchStrapiSingleEntry
         );
         if (singleEntry) {
           entriesFromStrapi.push(singleEntry);
-          fetchedSomethingNew = true;
+          fetchedSomethingNew = true; // Mark that something was fetched/updated
         } else if (SCRIPT_MODE === "incremental") {
+          // If not found and incremental, ensure removal from allContentUrls
           const locToRemove = getPageUrl(
             lang,
             contentType.defaultUrlPath,
@@ -418,28 +493,31 @@ async function main() {
           if (allContentUrls.has(locToRemove)) {
             allContentUrls.delete(locToRemove);
             console.log(
-              `Incremental: Removed single ${locToRemove} (not found/published).`
+              `Incremental: Removed single page ${locToRemove} (not found/published in current fetch).`
             );
           }
         }
       } else {
+        // Collection type
         const collectionEntries = await fetchStrapiCollectionEntries(
           contentType.apiSlug,
           lang,
-          SCRIPT_MODE === "incremental" ? lastRunTimestamp : null
+          fetchSince // Pass sinceTimestamp for collections
         );
         if (collectionEntries.length > 0) fetchedSomethingNew = true;
         entriesFromStrapi.push(...collectionEntries);
       }
+
       entriesFromStrapi.forEach((entry) => {
         let pathSegment,
           itemSlug = null;
-        if (isSingleType)
+        if (isSingleType) {
           pathSegment =
             contentType.defaultUrlPath === "" && lang === DEFAULT_LANGUAGE
               ? ""
               : contentType.defaultUrlPath;
-        else {
+        } else {
+          // Collection
           pathSegment = contentType.pathPrefix;
           if (!entry.attributes.slug) {
             console.warn(
@@ -455,15 +533,14 @@ async function main() {
           isSingleType ? "single" : "collection",
           itemSlug
         );
-        // No alternates array population needed
         allContentUrls.set(currentLoc, {
+          // This will add new or update existing
           loc: currentLoc,
           lastmod: new Date(
             entry.attributes.updatedAt || Date.now()
           ).toISOString(),
           changefreq: contentType.changefreq || "monthly",
           priority: contentType.priority || "0.5",
-          // alternates: undefined, // Explicitly undefined or just omit
           _sitemapFileKeyBaseForGrouping: isSingleType
             ? contentType.sitemapFileKeyBase
             : contentType.apiSlug,
@@ -471,54 +548,101 @@ async function main() {
       });
     }
   }
+
+  // Deletion & Reconciliation for collections in incremental mode
   if (SCRIPT_MODE === "incremental" && lastRunTimestamp) {
-    console.log("Incremental: Deletion checks for collections...");
-    const liveLocs = new Set();
+    console.log(
+      "Incremental: Full reconciliation for collections (deletions & updates)..."
+    );
+    const liveCollectionItemsData = new Map(); // Store {entry, contentType, language} for all live items
+
+    // Fetch ALL live collection items
     for (const lang of LANGUAGES) {
       for (const ct of CONTENT_TYPES_CONFIG.filter(
         (c) => c.type === "collection"
       )) {
-        (await fetchStrapiCollectionEntries(ct.apiSlug, lang, null)).forEach(
-          (e) => {
-            if (e.attributes.slug)
-              liveLocs.add(
-                getPageUrl(lang, ct.pathPrefix, "collection", e.attributes.slug)
-              );
-          }
+        const currentLiveItems = await fetchStrapiCollectionEntries(
+          ct.apiSlug,
+          lang,
+          null // Full fetch
         );
+        currentLiveItems.forEach((e) => {
+          if (e.attributes.slug) {
+            const loc = getPageUrl(
+              lang,
+              ct.pathPrefix,
+              "collection",
+              e.attributes.slug
+            );
+            liveCollectionItemsData.set(loc, {
+              entry: e,
+              contentType: ct,
+              language: lang,
+            });
+          }
+        });
       }
     }
-    const toDelete = [];
-    allContentUrls.forEach((urlData, k) => {
-      if (
-        CONTENT_TYPES_CONFIG.some(
-          (c) => c.type === "collection" && k.includes(`/${c.pathPrefix}/`)
-        ) &&
-        !liveLocs.has(k)
-      )
-        toDelete.push(k);
-    });
-    if (toDelete.length > 0) {
-      console.log(
-        `Incremental: Found ${toDelete.length} collection URLs to remove.`
+
+    // Identify items in allContentUrls (from cache + new/updated) that are collections and no longer live
+    const keysToDelete = [];
+    allContentUrls.forEach((urlData, locKey) => {
+      const isCollectionInMap = CONTENT_TYPES_CONFIG.some(
+        (ct) =>
+          ct.type === "collection" &&
+          (urlData._sitemapFileKeyBaseForGrouping === ct.apiSlug || // Check derived key first
+            locKey.includes(`/${ct.pathPrefix}/`)) // Fallback path check
       );
-      toDelete.forEach((k) => allContentUrls.delete(k));
+      if (isCollectionInMap && !liveCollectionItemsData.has(locKey)) {
+        keysToDelete.push(locKey);
+      }
+    });
+
+    if (keysToDelete.length > 0) {
+      console.log(
+        `Incremental: Removing ${keysToDelete.length} stale collection URLs from allContentUrls.`
+      );
+      keysToDelete.forEach((locKey) => allContentUrls.delete(locKey));
     }
-  }
+
+    // Ensure all currently live collection items are in allContentUrls with their latest data
+    liveCollectionItemsData.forEach((itemDetail, loc) => {
+      const { entry, contentType, language: lang } = itemDetail;
+      allContentUrls.set(loc, {
+        loc: loc,
+        lastmod: new Date(
+          entry.attributes.updatedAt || Date.now()
+        ).toISOString(),
+        changefreq: contentType.changefreq || "monthly",
+        priority: contentType.priority || "0.5",
+        _sitemapFileKeyBaseForGrouping: contentType.apiSlug,
+      });
+    });
+    console.log(
+      `Incremental: Size of allContentUrls after collection reconciliation: ${allContentUrls.size}`
+    );
+  } // End of incremental collection reconciliation
+
   console.log(
     `>>>> Reached point just before Array.from(allContentUrls.values()). Size: ${allContentUrls.size}`
   );
   const finalUrls = Array.from(allContentUrls.values());
   const sitemapRegistry = [];
   const urlsByFileKey = new Map();
+
   finalUrls.forEach((urlData) => {
-    let fileKey = "other-uncategorized-pages";
+    let fileKey = "other-uncategorized-pages"; // Fallback
     const locPath = new URL(urlData.loc).pathname;
     const entryLang =
       LANGUAGES.find((l) => locPath.startsWith(`/${l}/`)) || DEFAULT_LANGUAGE;
+
     if (urlData._sitemapFileKeyBaseForGrouping) {
       fileKey = `${urlData._sitemapFileKeyBaseForGrouping}-${entryLang}`;
     } else {
+      // This fallback should ideally not be hit if _sitemapFileKeyBaseForGrouping is always set
+      console.warn(
+        `[KEYING WARN FINAL] URL: ${urlData.loc} missing _sitemapFileKeyBaseForGrouping. Falling back to pathPrefix check.`
+      );
       for (const ct of CONTENT_TYPES_CONFIG) {
         if (
           ct.type === "collection" &&
@@ -527,12 +651,16 @@ async function main() {
           fileKey = `${ct.apiSlug}-${entryLang}`;
           break;
         }
+        // No need for single type check here if they all have _sitemapFileKeyBaseForGrouping
       }
     }
+
     if (!urlsByFileKey.has(fileKey)) urlsByFileKey.set(fileKey, []);
     urlsByFileKey.get(fileKey).push(urlData);
   });
+
   console.log(`Finished grouping. ${urlsByFileKey.size} sitemap groups.`);
+  // This cleanup should happen for both full and incremental before writing new files
   fs.readdirSync(OUTPUT_DIR).forEach((f) => {
     if (f.endsWith(".xml") && f !== "sitemap.xml")
       try {
@@ -541,7 +669,8 @@ async function main() {
         console.warn(`Could not rm ${f}: ${e.message}`);
       }
   });
-  console.log("Removed old sitemap parts. Writing new ones...");
+  console.log("Removed old sitemap parts (if any). Writing new ones...");
+
   urlsByFileKey.forEach((urlList, fileKeyBase) => {
     if (urlList.length === 0) {
       console.log(`Skipping empty sitemap group: ${fileKeyBase}`);
@@ -554,7 +683,7 @@ async function main() {
           ? `-${Math.floor(i / SITEMAP_URL_LIMIT) + 1}`
           : "";
       const sitemapFilename = `${fileKeyBase}${partSuffix}.xml`;
-      const xmlContent = generateSitemapXML(chunk); // This function now generates simpler XML
+      const xmlContent = generateSitemapXML(chunk);
       fs.writeFileSync(path.join(OUTPUT_DIR, sitemapFilename), xmlContent);
       console.log(
         `Generated sitemap: ${sitemapFilename} with ${chunk.length} URLs`
@@ -565,12 +694,13 @@ async function main() {
       });
     }
   });
+
   console.log("Finished writing sitemaps. Generating index...");
   if (sitemapRegistry.length > 0) {
     fs.writeFileSync(
       path.join(OUTPUT_DIR, "sitemap.xml"),
       generateSitemapIndexXML(sitemapRegistry)
-    ); // This function also simpler
+    );
     console.log(
       `Generated index: sitemap.xml with ${sitemapRegistry.length} files`
     );
@@ -579,18 +709,28 @@ async function main() {
     if (fs.existsSync(path.join(OUTPUT_DIR, "sitemap.xml")))
       fs.rmSync(path.join(OUTPUT_DIR, "sitemap.xml"));
   }
+
+  // Save state only if something was actually fetched as new/updated, or if it's a full run,
+  // or if it's an incremental run that had no prior state (effectively a full run for the purpose of state).
   if (
     SCRIPT_MODE === "full" ||
     (SCRIPT_MODE === "incremental" && fetchedSomethingNew) ||
     (SCRIPT_MODE === "incremental" && !lastRunTimestamp)
-  )
+  ) {
     saveLastRunState(startTime);
+  } else if (SCRIPT_MODE === "incremental" && lastRunTimestamp) {
+    console.log(
+      "Incremental run: No new/updated items fetched, state timestamp not updated."
+    );
+  }
+
   console.log(
     `Sitemap gen (${SCRIPT_MODE}) finished in ${
       (Date.now() - startTime) / 1000
     }s!`
   );
-}
+} // End of main()
+
 main().catch((error) => {
   console.error(`Sitemap gen (${SCRIPT_MODE}) FAILED:`, error);
   console.error("Stack:", error.stack);
